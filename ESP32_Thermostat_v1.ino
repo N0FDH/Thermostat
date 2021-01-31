@@ -48,6 +48,7 @@ const char* ServerName = "thermostat"; // Connect to the server with http://hpse
 typedef struct {
   float Temp = 0;
   byte  Humi = 0;
+  float Baro = 0;
 } sensordatatype;
 
 sensordatatype sensordata[NumOfSensors][SensorReadings];
@@ -59,13 +60,12 @@ struct settings {
   String Temp[NumOfEvents];  // Required temperature during the Start-End times
 };
 
-String       Received_Data[10];                  // TxId, RxId, MsgCnt, Temperature, Humidity, RelayState, Incoming Msg, Msg Rssi, Msg SNR (10-fields are sent to this Rx)
 String       SensorReading[NumOfSensors][6];     // 254 Sensors max. and 6 Parameters per sensor T, H, Relay-state. Maximum LoRa adress range is 255 - 1 for Server so 0 - 253
 String       DataFile = "params.txt";            // Storage file name on flash
 String       Time_str, DoW_str;                  // For Date and Time
 settings     Timer[7];                           // Timer settings, 7-days of the week
 int          SensorReadingPointer[NumOfSensors]; // Used for sensor data storage
-float        Hysteresis     = 0.36;              // Heating Hysteresis default value
+float        Hysteresis     = 0.4;               // Heating Hysteresis default value
 const String legendColour   = "black";           // Only use HTML colour names
 const String titleColour    = "purple";
 const String backgrndColour = "gainsboro";
@@ -73,8 +73,8 @@ const String data1Colour    = "red";
 const String data2Colour    = "orange";
 
 //################ VARIABLES ################
-const char* ssid       = "yourSSID";             // WiFi SSID     replace with details for your local network
-const char* password   = "YourPASSWORD";         // WiFi Password replace with details for your local network
+const char* ssid       = "qwerty";             // WiFi SSID     replace with details for your local network
+const char* password   = "mirabelleTHEcat7064";// WiFi Password replace with details for your local network
 // Example time zones
 //const char* Timezone   = "GMT0BST,M3.5.0/01,M10.5.0/02";
 //const char* Timezone = "MET-1METDST,M3.5.0/01,M10.5.0/02"; // Most of Europe
@@ -93,10 +93,10 @@ String Year                 = "2020";     // For the footer line
 float  Temperature          = 0;          // Variable for the current temperature
 float  Humidity             = 0;          // Variable for the current temperature
 
-float  TargetTemp           = 69.8;       // Default thermostat value for set temperature
-int    FrostTemp            = 41;         // Default thermostat value for frost protection temperature
-float  ManOverrideTemp      = 69.8;       // Manual override temperature
-float  MaxTemperature       = 82.4;       // Maximum temperature detection, switches off thermostat when reached
+float  TargetTemp           = 68;         // Default thermostat value for set temperature
+int    FrostTemp            = 38;         // Default thermostat value for frost protection temperature
+float  ManOverrideTemp      = 70;         // Manual override temperature
+float  MaxTemperature       = 80;         // Maximum temperature detection, switches off thermostat when reached
 
 bool   ManualOverride       = false;      // Manual override
 int    EarlyStart           = 0;          // Default thermostat value for early start of heating
@@ -109,7 +109,7 @@ int    TimerCheckDuration   = 5000;       // Check for timer event every 5-secon
 int    LastReadingDuration  = 1;          // Add sensor reading every n-mins
 int    LastTimerSwitchCheck = 0;          // Counter for last timer check
 int    LastReadingCheck     = 0;          // Counter for last reading saved check
-float  LastTemperature      = 0;          // Last temperature used for rogue reading detection
+float  LastTemperature      = 999;        // Last temperature used for rogue reading detection
 int    UnixTime             = 0;          // Time now (when updated) of the current time
 
 AsyncWebServer server(80); // Server on IP address port 80 (web-browser default, change to your requirements, e.g. 8080
@@ -526,23 +526,52 @@ void ActuateHeating(bool demand) {
   }
 }
 //#########################################################################################
-float C2F(float c)
+void ReadSensor() 
 {
-  return (1.8 * c) + 32;
-}
-void ReadSensor() {
-  if (simulating) {
-    Temperature = C2F(20.2 + random(-15, 15) / 10.0); // Generate a random temperature value between 18.7° and 21.7°
+  float tmp;
+  
+  if (simulating) 
+  {
+    Temperature = 68 + (random(-15, 15) / 10.0); // Generate a random temperature value between 66.5 and 69.5
     Humidity    = random(45, 55);                // Generate a random humidity value between 45% and 55%
   }
   else
   {
-    while (isnan(sensor.readTemperature())) { }  // Make sure there are no reading errors
-    Temperature = C2F(sensor.readTemperature()); // Read the current temperature
-    if (Temperature >= 122 || Temperature < -22) Temperature = LastTemperature; // Check and correct any errorneous readings
-    LastTemperature = Temperature;
+    while (1)
+    {
+      tmp = sensor.readTemperature();
+
+      // Make sure there are no reading errors
+      if (isnan(tmp))
+      {
+        continue;
+      }
+
+      // Convert to Fahrenheit
+      Temperature = (1.8 * tmp) + 32; 
+
+      // If this is the first reading, read twice
+      if (LastTemperature == 999)
+      {
+        LastTemperature = Temperature;
+        continue;
+      }
+
+      // Range check +/- 10 degrees of last reading
+      if (Temperature > (LastTemperature + 10) || Temperature < (LastTemperature - 10))
+      {
+        continue;
+      }
+
+      // Update LastTemperature
+      LastTemperature = Temperature;
+      break;
+    }
+
     while (isnan(sensor.readHumidity())) { }     // Make sure there are no reading errors
+    
     Humidity = sensor.readHumidity();
+    
     Serial.println("Temperature = " + String(Temperature, 1) + ", Humidity = " + String(Humidity, 0));
   }
 }
